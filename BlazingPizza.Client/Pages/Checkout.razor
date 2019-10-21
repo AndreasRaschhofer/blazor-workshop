@@ -2,31 +2,71 @@
 @inject OrderState OrderState
 @inject HttpClient HttpClient
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
 
 <div class="main">
-    <EditForm Model="OrderState.Order.DeliveryAddress" OnValidSubmit="PlaceOrder">
-        <div class="checkout-cols">
-            <div class="checkout-order-details">
-                <h4>Review order</h4>
-                <OrderReview Order="OrderState.Order" />
-            </div>
+    <AuthorizeView Context="authContext">
+        <NotAuthorized>
+            <h2>Redirecting you...</h2>
+        </NotAuthorized>
+        <Authorized>
 
-            <div class="checkout-delivery-address">
-                <h4>Deliver to...</h4>
-                <AddressEditor Address="@OrderState.Order.DeliveryAddress" />
-            </div>
-        </div>
+            <EditForm Model="OrderState.Order.DeliveryAddress" OnValidSubmit="PlaceOrder">
+                <div class="checkout-cols">
+                    <div class="checkout-order-details">
+                        <h4>Review order</h4>
+                        <OrderReview Order="OrderState.Order" />
+                    </div>
 
-        <button class="checkout-button btn btn-warning" type="submit" disabled="@isSubmitting">
-            Place order
-        </button>
+                    <div class="checkout-delivery-address">
+                        <h4>Deliver to...</h4>
+                        <AddressEditor Address="@OrderState.Order.DeliveryAddress" />
+                    </div>
+                </div>
 
-        <DataAnnotationsValidator />
-    </EditForm>
+                <button class="checkout-button btn btn-warning" type="submit" disabled="@isSubmitting">
+                    Place order
+                </button>
+
+                <DataAnnotationsValidator />
+            </EditForm>
+        </Authorized>
+    </AuthorizeView>
 </div>
 
 @code {
     bool isSubmitting;
+
+    [CascadingParameter] Task<AuthenticationState> AuthenticationStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateTask;
+        if (!authState.User.Identity.IsAuthenticated)
+        {
+            await LocalStorage.SetAsync(JSRuntime, "currentorder", OrderState.Order);
+
+            // The server won't accept orders from unauthenticated users, so avoid
+            // an error by making them log in at this point
+            NavigationManager.NavigateTo("user/signin?redirectUri=/checkout", true);
+        }
+
+        // try to recover any temporary saved order
+        if (!OrderState.Order.Pizzas.Any())
+        {
+            var savedOrder = await LocalStorage.GetAsync<Order>(JSRuntime, "currentorder");
+            if(savedOrder != null)
+            {
+                OrderState.ReplaceOrder(savedOrder);
+                await LocalStorage.DeleteAsync(JSRuntime, "currentorder");
+            }
+            else
+            {
+                // there's nothing to check out -> go to home
+                NavigationManager.NavigateTo(string.Empty);
+            }
+        }
+    }
 
     private async Task PlaceOrder()
     {
